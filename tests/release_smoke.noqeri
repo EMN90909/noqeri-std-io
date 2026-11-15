@@ -1,0 +1,12 @@
+import "../src/std_io.noqeri"
+
+function require(ok: bool): void {
+    if !ok { let invalid: *u8 = 0 as *u8 print(invalid[0]) }
+}
+
+require(ioColorCodeValid(0))
+require(ioColorCodeValid(255))
+require(!ioColorCodeValid(256))
+require(ioLogLevelValid(4))
+print("noqeri-std-io package tests: OK")
+

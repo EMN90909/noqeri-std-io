@@ -1,0 +1,27 @@
+// SPDX-License-Identifier: Apache-2.0
+module noqeri.std.io
+
+extern function ioWrite(value: string): bool
+extern function ioWriteLine(value: string): bool
+extern function ioReadLine(): string
+extern function ioLastStatus(): int
+
+export function ioPrint(value: string): bool {
+    if len(value) > 1048576 as usize { return false }
+    return ioWrite(value)
+}
+
+export function ioPrintLine(value: string): bool {
+    if len(value) > 1048576 as usize { return false }
+    return ioWriteLine(value)
+}
+
+export function ioReadLineBounded(): string {
+    return ioReadLine()
+}
+
+export function ioStatusOk(): bool { return ioLastStatus() == 0 }
+export function ioStatusCode(): int { return ioLastStatus() }
+export function ioColorCodeValid(code: int): bool { return code >= 0 && code <= 255 }
+export function ioLogLevelValid(level: int): bool { return level >= 0 && level <= 4 }
+
