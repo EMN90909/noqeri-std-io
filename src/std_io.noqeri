@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-module noqeri.std.io
+module noqeri.std_io
 
 extern function ioWrite(value: string): bool
 extern function ioWriteLine(value: string): bool
