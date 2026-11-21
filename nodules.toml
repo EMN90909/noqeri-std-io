@@ -1,0 +1,9 @@
+[nodule]
+format = "ndl-1"
+name = "noqeri/std-io"
+version = "1.0.0"
+entry = "src/std_io.noqeri"
+kind = "library"
+target = "portable"
+license = "Apache-2.0"
+description = "Official noqeri-std-io package for the Noqeri ecosystem"
