@@ -1,12 +1,63 @@
+// SPDX-License-Identifier: Apache-2.0
 import "../src/std_io.noqeri"
 
 function require(ok: bool): void {
     if !ok { let invalid: *u8 = 0 as *u8 print(invalid[0]) }
 }
 
-require(ioColorCodeValid(0))
-require(ioColorCodeValid(255))
-require(!ioColorCodeValid(256))
-require(ioLogLevelValid(4))
-print("noqeri-std-io package tests: OK")
+function test_std_io(): int {
+    require(ioStatusOk())
+    require(ioColorCodeValid(0))
+    require(ioColorCodeValid(255))
+    require(!ioColorCodeValid(256))
+    require(ioLogLevelValid(4))
 
+    let buf: [u8; 32]
+    let sl: []u8 = slice(&buf[0 as usize], 32 as usize)
+    let cur: IoCursor
+    ioCursorInit(&cur, 32 as usize)
+    require(ioCursorWriteU32Be(&cur, sl, 0x12345678 as u32))
+    require(ioCursorWriteU16Be(&cur, sl, 0xABCD as u32))
+    require(ioCursorRemaining(&cur) == 26 as usize)
+
+    require(ioCursorSeek(&cur, 0 as usize))
+    let out32: u32 = 0 as u32
+    let out16: u32 = 0 as u32
+    require(ioCursorReadU32Be(&cur, sl, &out32))
+    require(out32 == 0x12345678 as u32)
+    require(ioCursorReadU16Be(&cur, sl, &out16))
+    require(out16 == 0xABCD as u32)
+
+    let ringBack: [u8; 256]
+    let ring: IoRingBuffer
+    ioRingInit(&ring, slice(&ringBack[0 as usize], 256 as usize))
+    let msg: [u8; 4]
+    msg[0] = 65 as u8
+    msg[1] = 66 as u8
+    msg[2] = 67 as u8
+    msg[3] = 10 as u8
+    require(ioRingWrite(&ring, slice(&msg[0 as usize], 4 as usize)) == 4 as usize)
+    require(ioRingLen(&ring) == 4 as usize)
+    let out: [u8; 4]
+    require(ioRingRead(&ring, slice(&out[0 as usize], 4 as usize)) == 4 as usize)
+    require(out[0] == 65 as u8 && out[2] == 67 as u8)
+    require(ioRingLen(&ring) == 0 as usize)
+
+    let vbuf: [u8; 16]
+    let vsl: []u8 = slice(&vbuf[0 as usize], 16 as usize)
+    let vn: usize = ioWriteVarint(vsl, 0 as usize, 300000 as u64)
+    require(vn == 3 as usize)
+    let decoded: u64 = 0 as u64
+    require(ioReadVarint(vsl, 0 as usize, &decoded) == 3 as usize)
+    require(decoded == 300000 as u64)
+
+    let hexBuf: [u8; 8]
+    require(ioEncodeHex(slice(&msg[0 as usize], 2 as usize), slice(&hexBuf[0 as usize], 8 as usize)) == 4 as usize)
+    require(hexBuf[0] == 52 as u8 && hexBuf[1] == 49 as u8)
+    let decLen: usize = ioFormatU64(4096 as u64, vsl)
+    require(decLen == 4 as usize && vsl[0] == 52 as u8 && vsl[3] == 54 as u8)
+    return 1
+}
+
+require(test_std_io() == 1)
+print("noqeri-std-io package tests: OK")

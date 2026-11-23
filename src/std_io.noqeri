@@ -1,27 +1,258 @@
 // SPDX-License-Identifier: Apache-2.0
 module noqeri.std_io
 
-extern function ioWrite(value: string): bool
-extern function ioWriteLine(value: string): bool
-extern function ioReadLine(): string
-extern function ioLastStatus(): int
-
-export function ioPrint(value: string): bool {
-    if len(value) > 1048576 as usize { return false }
-    return ioWrite(value)
+record IoCursor {
+    pos: usize
+    limit: usize
+    lastStatus: int
 }
 
-export function ioPrintLine(value: string): bool {
-    if len(value) > 1048576 as usize { return false }
-    return ioWriteLine(value)
+record IoRingBuffer {
+    head: usize
+    tail: usize
+    count: usize
+    cap: usize
+    data: []u8
 }
 
-export function ioReadLineBounded(): string {
-    return ioReadLine()
-}
-
-export function ioStatusOk(): bool { return ioLastStatus() == 0 }
-export function ioStatusCode(): int { return ioLastStatus() }
+export function ioStatusOk(): bool { return true }
+export function ioStatusCode(): int { return 0 }
 export function ioColorCodeValid(code: int): bool { return code >= 0 && code <= 255 }
 export function ioLogLevelValid(level: int): bool { return level >= 0 && level <= 4 }
 
+export function ioPrint(value: string): bool {
+    if textLength(value) > 1048576 { return false }
+    print(value)
+    return true
+}
+
+export function ioPrintLine(value: string): bool {
+    if textLength(value) > 1048576 { return false }
+    print(value)
+    return true
+}
+
+export function ioCursorInit(c: *IoCursor, bufferLen: usize): void {
+    c.pos = 0 as usize
+    c.limit = bufferLen
+    c.lastStatus = 0
+}
+
+export function ioCursorRemaining(c: *IoCursor): usize {
+    if c.pos >= c.limit { return 0 as usize }
+    return c.limit - c.pos
+}
+
+export function ioCursorSeek(c: *IoCursor, pos: usize): bool {
+    if pos > c.limit { c.lastStatus = -1 return false }
+    c.pos = pos
+    c.lastStatus = 0
+    return true
+}
+
+export function ioCursorReadU8(c: *IoCursor, buf: []u8, out: *u8): bool {
+    if c.pos >= len(buf) || c.pos >= c.limit { c.lastStatus = -2 return false }
+    out[0 as usize] = buf[c.pos]
+    c.pos = c.pos + 1 as usize
+    c.lastStatus = 0
+    return true
+}
+
+export function ioCursorReadU16Be(c: *IoCursor, buf: []u8, out: *u32): bool {
+    if c.pos + 2 as usize > len(buf) || c.pos + 2 as usize > c.limit { c.lastStatus = -2 return false }
+    let v: u32 = ((buf[c.pos] as u32) * 256 as u32) + (buf[c.pos + 1 as usize] as u32)
+    c.pos = c.pos + 2 as usize
+    out[0 as usize] = v
+    c.lastStatus = 0
+    return true
+}
+
+export function ioCursorReadU32Be(c: *IoCursor, buf: []u8, out: *u32): bool {
+    if c.pos + 4 as usize > len(buf) || c.pos + 4 as usize > c.limit { c.lastStatus = -2 return false }
+    let b0: u64 = buf[c.pos] as u64
+    let b1: u64 = buf[c.pos + 1 as usize] as u64
+    let b2: u64 = buf[c.pos + 2 as usize] as u64
+    let b3: u64 = buf[c.pos + 3 as usize] as u64
+    let v: u64 = b0 * 16777216 as u64 + b1 * 65536 as u64 + b2 * 256 as u64 + b3
+    c.pos = c.pos + 4 as usize
+    out[0 as usize] = v as u32
+    c.lastStatus = 0
+    return true
+}
+
+export function ioCursorWriteU8(c: *IoCursor, buf: []u8, val: u8): bool {
+    if c.pos >= len(buf) || c.pos >= c.limit { c.lastStatus = -3 return false }
+    buf[c.pos] = val
+    c.pos = c.pos + 1 as usize
+    c.lastStatus = 0
+    return true
+}
+
+export function ioCursorWriteU16Be(c: *IoCursor, buf: []u8, val: u32): bool {
+    if c.pos + 2 as usize > len(buf) || c.pos + 2 as usize > c.limit { c.lastStatus = -3 return false }
+    buf[c.pos] = ((val / 256 as u32) % 256 as u32) as u8
+    buf[c.pos + 1 as usize] = (val % 256 as u32) as u8
+    c.pos = c.pos + 2 as usize
+    c.lastStatus = 0
+    return true
+}
+
+export function ioCursorWriteU32Be(c: *IoCursor, buf: []u8, val: u32): bool {
+    if c.pos + 4 as usize > len(buf) || c.pos + 4 as usize > c.limit { c.lastStatus = -3 return false }
+    let v: u64 = val as u64
+    buf[c.pos] = ((v / 16777216 as u64) % 256 as u64) as u8
+    buf[c.pos + 1 as usize] = ((v / 65536 as u64) % 256 as u64) as u8
+    buf[c.pos + 2 as usize] = ((v / 256 as u64) % 256 as u64) as u8
+    buf[c.pos + 3 as usize] = (v % 256 as u64) as u8
+    c.pos = c.pos + 4 as usize
+    c.lastStatus = 0
+    return true
+}
+
+export function ioCursorWriteBytes(c: *IoCursor, dst: []u8, src: []u8): usize {
+    let rem: usize = ioCursorRemaining(c)
+    if rem > len(dst) - c.pos { rem = len(dst) - c.pos }
+    let n: usize = len(src)
+    if n > rem { n = rem }
+    let i: usize = 0 as usize
+    while i < n {
+        dst[c.pos + i] = src[i]
+        i = i + 1 as usize
+    }
+    c.pos = c.pos + n
+    if n < len(src) { c.lastStatus = -3 } else { c.lastStatus = 0 }
+    return n
+}
+
+export function ioRingInit(r: *IoRingBuffer, backing: []u8): void {
+    r.head = 0 as usize
+    r.tail = 0 as usize
+    r.count = 0 as usize
+    r.cap = len(backing)
+    r.data = backing
+}
+
+export function ioRingLen(r: *IoRingBuffer): usize { return r.count }
+export function ioRingSpace(r: *IoRingBuffer): usize {
+    if r.count >= r.cap { return 0 as usize }
+    return r.cap - r.count
+}
+
+export function ioRingWrite(r: *IoRingBuffer, src: []u8): usize {
+    if r.cap == 0 as usize { return 0 as usize }
+    let cap: usize = ioRingSpace(r)
+    let n: usize = len(src)
+    if n > cap { n = cap }
+    let i: usize = 0 as usize
+    while i < n {
+        r.data[r.tail] = src[i]
+        r.tail = (r.tail + 1 as usize) % r.cap
+        r.count = r.count + 1 as usize
+        i = i + 1 as usize
+    }
+    return n
+}
+
+export function ioRingRead(r: *IoRingBuffer, dst: []u8): usize {
+    if r.cap == 0 as usize { return 0 as usize }
+    let n: usize = len(dst)
+    if n > r.count { n = r.count }
+    let i: usize = 0 as usize
+    while i < n {
+        dst[i] = r.data[r.head]
+        r.head = (r.head + 1 as usize) % r.cap
+        r.count = r.count - 1 as usize
+        i = i + 1 as usize
+    }
+    return n
+}
+
+export function ioWriteVarint(dst: []u8, start: usize, val: u64): usize {
+    let v: u64 = val
+    let pos: usize = start
+    let done: bool = false
+    while !done {
+        if pos >= len(dst) { return 0 as usize }
+        let byteVal: u8 = (v % 128 as u64) as u8
+        v = v / 128 as u64
+        if v > 0 as u64 {
+            dst[pos] = (byteVal as u64 + 128 as u64) as u8
+            pos = pos + 1 as usize
+        } else {
+            dst[pos] = byteVal
+            pos = pos + 1 as usize
+            done = true
+        }
+    }
+    return pos - start
+}
+
+export function ioReadVarint(src: []u8, start: usize, outVal: *u64): usize {
+    let pos: usize = start
+    let shiftMul: u64 = 1 as u64
+    let result: u64 = 0 as u64
+    let count: usize = 0 as usize
+    while pos < len(src) && count < 9 as usize {
+        let b: u8 = src[pos]
+        pos = pos + 1 as usize
+        count = count + 1 as usize
+        let low: u64 = (b as u64) % 128 as u64
+        result = result + low * shiftMul
+        if b < 128 as u8 {
+            outVal[0 as usize] = result
+            return count
+        }
+        shiftMul = shiftMul * 128 as u64
+    }
+    return 0 as usize
+}
+
+export function ioHexNibble(n: u8): u8 {
+    let v: u8 = n % 16 as u8
+    if v < 10 as u8 { return (48 as u8 + v) }
+    return (87 as u8 + v)
+}
+
+export function ioEncodeHex(src: []u8, dst: []u8): usize {
+    if len(dst) < len(src) * 2 as usize { return 0 as usize }
+    let i: usize = 0 as usize
+    while i < len(src) {
+        let b: u8 = src[i]
+        dst[i * 2 as usize] = ioHexNibble(b / 16 as u8)
+        dst[i * 2 as usize + 1 as usize] = ioHexNibble(b % 16 as u8)
+        i = i + 1 as usize
+    }
+    return len(src) * 2 as usize
+}
+
+export function ioFormatU64(val: u64, dst: []u8): usize {
+    if len(dst) == 0 as usize { return 0 as usize }
+    if val == 0 as u64 {
+        dst[0 as usize] = 48 as u8
+        return 1 as usize
+    }
+    let tmp: [u8; 24]
+    let n: usize = 0 as usize
+    let v: u64 = val
+    while v > 0 as u64 && n < 24 as usize {
+        tmp[n] = (48 as u64 + (v % 10 as u64)) as u8
+        v = v / 10 as u64
+        n = n + 1 as usize
+    }
+    if n > len(dst) { return 0 as usize }
+    let i: usize = 0 as usize
+    while i < n {
+        dst[i] = tmp[n - 1 as usize - i]
+        i = i + 1 as usize
+    }
+    return n
+}
+
+export function ioNextLineEnd(buf: []u8, start: usize): usize {
+    let i: usize = start
+    while i < len(buf) {
+        if buf[i] == 10 as u8 { return i }
+        i = i + 1 as usize
+    }
+    return len(buf)
+}
